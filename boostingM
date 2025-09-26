@@ -20,3 +20,169 @@ from scipy.stats import randint, uniform
 import warnings
 
 warnings.filterwarnings("ignore")  # keep output clean for examples
+
+
+def prepareRegressionData(
+    nSamples: int = 500, nFeatures: int = 10, noise: float = 10.0, randomState: int = 42
+):
+    """
+    Create a synthetic regression dataset and return scaled train/test splits.
+    """
+    X, y = make_regression(
+        n_samples=nSamples, n_features=nFeatures, noise=noise, random_state=randomState
+    )
+    XTrain, XTest, yTrain, yTest = train_test_split(
+        X, y, test_size=0.2, random_state=randomState)
+
+    scaler = StandardScaler()
+    XTrainScaled = scaler.fit_transform(XTrain)
+    XTestScaled = scaler.transform(XTest)
+
+    return XTrainScaled, XTestScaled, yTrain, yTest
+
+
+def prepareClassificationData(
+    nSamples: int = 1000, nFeatures: int = 20, nClasses: int = 2, randomState: int = 42
+):
+    """
+    Create a synthetic classification dataset and return scaled train/test splits.
+    """
+    X, y = make_classification(
+        n_samples=nSamples,
+        n_features=nFeatures,
+        n_informative=int(nFeatures * 0.6),
+        n_redundant=int(nFeatures * 0.1),
+        n_repeated=0,
+        n_classes=nClasses,
+        random_state=randomState,
+    )
+    XTrain, XTest, yTrain, yTest = train_test_split(
+        X, y, test_size=0.25, random_state=randomState)
+
+    scaler = StandardScaler()
+    XTrainScaled = scaler.fit_transform(XTrain)
+    XTestScaled = scaler.transform(XTest)
+
+    return XTrainScaled, XTestScaled, yTrain, yTest
+
+
+def trainGradientBoostingRegressor(
+    XTrain: np.ndarray, yTrain: np.ndarray, randomState: int = 42
+) -> GradientBoostingRegressor:
+    """
+    Train a GradientBoostingRegressor with a simple hyperparameter search and return best estimator.
+    """
+    baseModel = GradientBoostingRegressor(random_state=randomState)
+
+    paramDist = {
+        "n_estimators": randint(50, 300),
+        "max_depth": randint(1, 6),
+        "learning_rate": uniform(0.01, 0.5),
+        "subsample": uniform(0.6, 0.4),
+    }
+
+    search = RandomizedSearchCV(
+        estimator=baseModel,
+        param_distributions=paramDist,
+        n_iter=25,
+        cv=3,
+        scoring="neg_mean_squared_error",
+        random_state=randomState,
+        n_jobs=-1,
+    )
+
+    search.fit(XTrain, yTrain)
+    print("GradientBoostingRegressor - Best params:", search.best_params_)
+    return search.best_estimator_
+
+
+def evaluateRegressor(model: Any, XTest: np.ndarray, yTest: np.ndarray) -> Dict[str, float]:
+    """
+    Evaluate regressor and return common regression metrics.
+    """
+    preds = model.predict(XTest)
+    mse = mean_squared_error(yTest, preds)
+    mae = mean_absolute_error(yTest, preds)
+    r2 = r2_score(yTest, preds)
+    print(f"Regressor - MSE: {mse:.4f}, MAE: {mae:.4f}, R2: {r2:.4f}")
+    return {"mse": mse, "mae": mae, "r2": r2}
+
+
+def trainAdaBoostClassifier(
+    XTrain: np.ndarray, yTrain: np.ndarray, randomState: int = 42
+) -> AdaBoostClassifier:
+    """
+    Train an AdaBoostClassifier (with DecisionTree base) and return the best estimator found via RandomizedSearchCV.
+    """
+    baseEstimator = DecisionTreeClassifier(
+        random_state=randomState, max_depth=1)  # stumps by default
+
+    ada = AdaBoostClassifier(
+        base_estimator=baseEstimator, random_state=randomState)
+
+    paramDist = {
+        "n_estimators": randint(50, 300),
+        "learning_rate": uniform(0.01, 2.0),
+        # tune the base estimator depth via wrapper param (scikit-learn uses estimator__<param> pattern)
+        "base_estimator__max_depth": randint(1, 6),
+    }
+
+    search = RandomizedSearchCV(
+        estimator=ada,
+        param_distributions=paramDist,
+        n_iter=30,
+        cv=3,
+        scoring="accuracy",
+        random_state=randomState,
+        n_jobs=-1,
+    )
+
+    search.fit(XTrain, yTrain)
+    print("AdaBoostClassifier - Best params:", search.best_params_)
+    return search.best_estimator_
+
+
+def evaluateClassifier(model: Any, XTest: np.ndarray, yTest: np.ndarray) -> Dict[str, float]:
+    """
+    Evaluate classifier and return accuracy, precision, recall, f1.
+    """
+    preds = model.predict(XTest)
+    acc = accuracy_score(yTest, preds)
+    prec = precision_score(yTest, preds, average="binary", zero_division=0)
+    rec = recall_score(yTest, preds, average="binary", zero_division=0)
+    f1 = f1_score(yTest, preds, average="binary", zero_division=0)
+    print(
+        f"Classifier - Acc: {acc:.4f}, Prec: {prec:.4f}, Rec: {rec:.4f}, F1: {f1:.4f}")
+    return {"accuracy": acc, "precision": prec, "recall": rec, "f1": f1}
+
+
+def main():
+    """Run the regression and classification boosting examples end-to-end."""
+
+    # ----- Regression Example -----
+    XTrainR, XTestR, yTrainR, yTestR = prepareRegressionData(
+        nSamples=800, nFeatures=12, noise=15.0)
+    print("\n--- Training GradientBoostingRegressor ---")
+    gbrModel = trainGradientBoostingRegressor(XTrainR, yTrainR)
+    regMetrics = evaluateRegressor(gbrModel, XTestR, yTestR)
+
+    # ----- Classification Example -----
+    XTrainC, XTestC, yTrainC, yTestC = prepareClassificationData(
+        nSamples=1200, nFeatures=20)
+    print("\n--- Training AdaBoostClassifier ---")
+    adaModel = trainAdaBoostClassifier(XTrainC, yTrainC)
+    clfMetrics = evaluateClassifier(adaModel, XTestC, yTestC)
+
+    # Return summary as a pandas DataFrame for quick viewing if needed
+    summary = pd.DataFrame(
+        {
+            "regression": regMetrics,
+            "classification": clfMetrics,
+        }
+    )
+    print("\nSummary metrics:\n", summary)
+    return summary
+
+
+if __name__ == "__main__":
+    main()
